@@ -1,2 +1,3 @@
-# logging
-Logging integrations for Go's log/slog package.
+# Logging
+
+A collection of `log/slog` integrations.
