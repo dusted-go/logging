@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -39,6 +40,7 @@ func colorize(colorCode int, v string) string {
 
 type Handler struct {
 	h slog.Handler
+	r func([]string, slog.Attr) slog.Attr
 	b *bytes.Buffer
 	m *sync.Mutex
 }
@@ -78,35 +80,77 @@ func (h *Handler) computeAttrs(
 
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
-	level := r.Level.String() + ":"
+	var level string
+	levelAttr := slog.Attr{
+		Key:   slog.LevelKey,
+		Value: slog.AnyValue(r.Level),
+	}
+	levelAttr = h.r([]string{}, levelAttr)
 
-	switch r.Level {
-	case slog.LevelDebug:
-		level = colorize(darkGray, level)
-	case slog.LevelInfo:
-		level = colorize(cyan, level)
-	case slog.LevelWarn:
-		level = colorize(lightYellow, level)
-	case slog.LevelError:
-		level = colorize(lightRed, level)
+	if !levelAttr.Equal(slog.Attr{}) {
+		level = levelAttr.Value.String() + ":"
+
+		if r.Level <= slog.LevelDebug {
+			level = colorize(lightGray, level)
+		} else if r.Level <= slog.LevelInfo {
+			level = colorize(cyan, level)
+		} else if r.Level < slog.LevelWarn {
+			level = colorize(lightBlue, level)
+		} else if r.Level < slog.LevelError {
+			level = colorize(lightYellow, level)
+		} else if r.Level <= slog.LevelError+1 {
+			level = colorize(lightRed, level)
+		} else if r.Level > slog.LevelError+1 {
+			level = colorize(lightMagenta, level)
+		}
+	}
+
+	var timestamp string
+	timeAttr := slog.Attr{
+		Key:   slog.TimeKey,
+		Value: slog.StringValue(r.Time.Format(timeFormat)),
+	}
+	timeAttr = h.r([]string{}, timeAttr)
+	if !timeAttr.Equal(slog.Attr{}) {
+		timestamp = colorize(lightGray, timeAttr.Value.String())
+	}
+
+	var msg string
+	msgAttr := slog.Attr{
+		Key:   slog.MessageKey,
+		Value: slog.StringValue(r.Message),
+	}
+	msgAttr = h.r([]string{}, msgAttr)
+	if !msgAttr.Equal(slog.Attr{}) {
+		msg = colorize(white, msgAttr.Value.String())
 	}
 
 	attrs, err := h.computeAttrs(ctx, r)
 	if err != nil {
 		return err
 	}
-
 	bytes, err := json.MarshalIndent(attrs, "", "  ")
 	if err != nil {
 		return fmt.Errorf("error when marshaling attrs: %w", err)
 	}
 
-	fmt.Println(
-		colorize(lightGray, r.Time.Format(timeFormat)),
-		level,
-		colorize(white, r.Message),
-		colorize(darkGray, string(bytes)),
-	)
+	out := strings.Builder{}
+	if len(timestamp) > 0 {
+		out.WriteString(timestamp)
+		out.WriteString(" ")
+	}
+	if len(level) > 0 {
+		out.WriteString(level)
+		out.WriteString(" ")
+	}
+	if len(msg) > 0 {
+		out.WriteString(msg)
+		out.WriteString(" ")
+	}
+	if len(bytes) > 0 {
+		out.WriteString(colorize(darkGray, string(bytes)))
+	}
+	fmt.Println(out.String())
 
 	return nil
 }
@@ -139,6 +183,7 @@ func NewHandler(opts *slog.HandlerOptions) *Handler {
 			AddSource:   opts.AddSource,
 			ReplaceAttr: suppressDefaults(opts.ReplaceAttr),
 		}),
+		r: opts.ReplaceAttr,
 		m: &sync.Mutex{},
 	}
 }
