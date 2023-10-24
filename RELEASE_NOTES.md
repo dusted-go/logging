@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+# 1.1.3
+
+- Fixed bug in `stackdriver.Middleware` which meant that a single log handler was shared across the entire lifespan of the application instead of creating request scoped log handlers
+
 # 1.1.2
 
 - Added `nil` checks around the `ReplaceAttr` function to prevent panics (see: #2)
