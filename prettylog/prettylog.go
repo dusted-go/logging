@@ -85,7 +85,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.LevelKey,
 		Value: slog.AnyValue(r.Level),
 	}
-	levelAttr = h.r([]string{}, levelAttr)
+	if h.r != nil {
+		levelAttr = h.r([]string{}, levelAttr)
+	}
 
 	if !levelAttr.Equal(slog.Attr{}) {
 		level = levelAttr.Value.String() + ":"
@@ -110,7 +112,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.TimeKey,
 		Value: slog.StringValue(r.Time.Format(timeFormat)),
 	}
-	timeAttr = h.r([]string{}, timeAttr)
+	if h.r != nil {
+		timeAttr = h.r([]string{}, timeAttr)
+	}
 	if !timeAttr.Equal(slog.Attr{}) {
 		timestamp = colorize(lightGray, timeAttr.Value.String())
 	}
@@ -120,7 +124,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.MessageKey,
 		Value: slog.StringValue(r.Message),
 	}
-	msgAttr = h.r([]string{}, msgAttr)
+	if h.r != nil {
+		msgAttr = h.r([]string{}, msgAttr)
+	}
 	if !msgAttr.Equal(slog.Attr{}) {
 		msg = colorize(white, msgAttr.Value.String())
 	}
