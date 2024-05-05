@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,15 +36,17 @@ const (
 	white        = 97
 )
 
-func colorize(colorCode int, v string) string {
+func colorizer(colorCode int, v string) string {
 	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(colorCode), v, reset)
 }
 
 type Handler struct {
-	h slog.Handler
-	r func([]string, slog.Attr) slog.Attr
-	b *bytes.Buffer
-	m *sync.Mutex
+	h        slog.Handler
+	r        func([]string, slog.Attr) slog.Attr
+	b        *bytes.Buffer
+	m        *sync.Mutex
+	writer   io.Writer
+	colorize bool
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -79,6 +83,12 @@ func (h *Handler) computeAttrs(
 }
 
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
+	colorize := func(code int, value string) string {
+		return value
+	}
+	if h.colorize == true {
+		colorize = colorizer
+	}
 
 	var level string
 	levelAttr := slog.Attr{
@@ -156,7 +166,10 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	if len(bytes) > 0 {
 		out.WriteString(colorize(darkGray, string(bytes)))
 	}
-	fmt.Println(out.String())
+	_, err = io.WriteString(h.writer, out.String())
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -177,19 +190,44 @@ func suppressDefaults(
 	}
 }
 
-func NewHandler(opts *slog.HandlerOptions) *Handler {
-	if opts == nil {
-		opts = &slog.HandlerOptions{}
+func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
+	if handlerOptions == nil {
+		handlerOptions = &slog.HandlerOptions{}
 	}
-	b := &bytes.Buffer{}
-	return &Handler{
-		b: b,
-		h: slog.NewJSONHandler(b, &slog.HandlerOptions{
-			Level:       opts.Level,
-			AddSource:   opts.AddSource,
-			ReplaceAttr: suppressDefaults(opts.ReplaceAttr),
+
+	buf := &bytes.Buffer{}
+	handler := &Handler{
+		b: buf,
+		h: slog.NewJSONHandler(buf, &slog.HandlerOptions{
+			Level:       handlerOptions.Level,
+			AddSource:   handlerOptions.AddSource,
+			ReplaceAttr: suppressDefaults(handlerOptions.ReplaceAttr),
 		}),
-		r: opts.ReplaceAttr,
+		r: handlerOptions.ReplaceAttr,
 		m: &sync.Mutex{},
+	}
+
+	for _, opt := range options {
+		opt(handler)
+	}
+
+	return handler
+}
+
+func NewHandler(opts *slog.HandlerOptions) *Handler {
+	return New(opts, WithDestinationWriter(os.Stdout), WithColor())
+}
+
+type Option func(h *Handler)
+
+func WithDestinationWriter(writer io.Writer) Option {
+	return func(h *Handler) {
+		h.writer = writer
+	}
+}
+
+func WithColor() Option {
+	return func(h *Handler) {
+		h.colorize = true
 	}
 }
