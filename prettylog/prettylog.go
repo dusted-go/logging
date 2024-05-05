@@ -86,7 +86,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	colorize := func(code int, value string) string {
 		return value
 	}
-	if h.colorize == true {
+	if h.colorize {
 		colorize = colorizer
 	}
 
