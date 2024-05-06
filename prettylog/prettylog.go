@@ -167,12 +167,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		out.WriteString(colorize(darkGray, string(bytes)))
 	}
 
-	str := out.String()
-	if !strings.HasSuffix(str, "\n") {
-		str = str + "\n"
-	}
-
-	_, err = io.WriteString(h.writer, str)
+	_, err = io.WriteString(h.writer, out.String()+"\n")
 	if err != nil {
 		return err
 	}
