@@ -9,7 +9,7 @@ Prettylog is a `log/slog` handler for pretty console output, designed to be used
 Example:
 
 ```
-prettyHandler = prettylog.NewHandler(&slog.HandlerOptions{
+prettyHandler := prettylog.NewHandler(&slog.HandlerOptions{
     Level:       slog.LevelInfo,
     AddSource:   false,
     ReplaceAttr: nil,
