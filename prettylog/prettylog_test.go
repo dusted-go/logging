@@ -3,6 +3,7 @@ package prettylog
 import (
 	"log/slog"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -26,7 +27,11 @@ func Test_WritesToProvidedStream(t *testing.T) {
 	}
 
 	lineMatcher := regexp.MustCompile(`\[\d{2}:\d{2}:\d{2}\.\d{3}\] INFO: testing logger {}`)
-	if lineMatcher.Match(cs.lines[0]) == false {
-		t.Errorf("expected `testing logger` but found `%s`", string(cs.lines[0]))
+	line := string(cs.lines[0])
+	if lineMatcher.MatchString(line) == false {
+		t.Errorf("expected `testing logger` but found `%s`", line)
+	}
+	if !strings.HasSuffix(line, "\n") {
+		t.Errorf("exected line to be terminated with `\\n` but found `%s`", line[len(line)-1:])
 	}
 }
