@@ -41,12 +41,13 @@ func colorizer(colorCode int, v string) string {
 }
 
 type Handler struct {
-	h        slog.Handler
-	r        func([]string, slog.Attr) slog.Attr
-	b        *bytes.Buffer
-	m        *sync.Mutex
-	writer   io.Writer
-	colorize bool
+	h                slog.Handler
+	r                func([]string, slog.Attr) slog.Attr
+	b                *bytes.Buffer
+	m                *sync.Mutex
+	writer           io.Writer
+	colorize         bool
+	outputEmptyAttrs bool
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -145,9 +146,13 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(attrs, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error when marshaling attrs: %w", err)
+
+	var attrsAsBytes []byte
+	if h.outputEmptyAttrs || len(attrs) > 0 {
+		attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
+		if err != nil {
+			return fmt.Errorf("error when marshaling attrs: %w", err)
+		}
 	}
 
 	out := strings.Builder{}
@@ -163,8 +168,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		out.WriteString(msg)
 		out.WriteString(" ")
 	}
-	if len(bytes) > 0 {
-		out.WriteString(colorize(darkGray, string(bytes)))
+	if len(attrsAsBytes) > 0 {
+		out.WriteString(colorize(darkGray, string(attrsAsBytes)))
 	}
 
 	_, err = io.WriteString(h.writer, out.String()+"\n")
@@ -216,7 +221,7 @@ func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 }
 
 func NewHandler(opts *slog.HandlerOptions) *Handler {
-	return New(opts, WithDestinationWriter(os.Stdout), WithColor())
+	return New(opts, WithDestinationWriter(os.Stdout), WithColor(), WithOutputEmptyAttrs())
 }
 
 type Option func(h *Handler)
@@ -230,5 +235,11 @@ func WithDestinationWriter(writer io.Writer) Option {
 func WithColor() Option {
 	return func(h *Handler) {
 		h.colorize = true
+	}
+}
+
+func WithOutputEmptyAttrs() Option {
+	return func(h *Handler) {
+		h.outputEmptyAttrs = true
 	}
 }
