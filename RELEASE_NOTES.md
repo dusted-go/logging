@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+# 1.3.0
+
+- Added a new option called `WithOutputEmptyAttrs` to enable the writing of empty `Attrs`. This is enabled by default for backwards compatibility.
+
 # 1.2.2
 
 - Fixed bug where calling `.With` on an existing prettylog logger would panic (see: https://github.com/dusted-go/logging/issues/6)
