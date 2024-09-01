@@ -8,13 +8,48 @@ Prettylog is a `log/slog` handler for pretty console output, designed to be used
 
 Example:
 
+```go
+package demo
+
+import (
+	"log/slog"
+	
+	"github.com/dusted-go/logging/prettylog"
+)
+
+func demo() {
+	prettyHandler := prettylog.NewHandler(&slog.HandlerOptions{
+		Level:       slog.LevelInfo,
+		AddSource:   false,
+		ReplaceAttr: nil,
+	})
+	logger := slog.New(prettyHandler)
+}
 ```
-prettyHandler := prettylog.NewHandler(&slog.HandlerOptions{
-    Level:       slog.LevelInfo,
-    AddSource:   false,
-    ReplaceAttr: nil,
-})
-logger := slog.New(prettyHandler)
+
+## context
+
+The library provides storing and retrieving a logger from a context. If no logger is found in the context, then `slog.Default()` is returned.
+
+```go
+package demo
+
+import (
+	"context"
+	"log/slog"
+
+	slogContext "github.com/dusted-go/logging/prettylog/context"
+)
+
+func demo() {
+	ctx := context.Background()
+
+	// add logger to context
+	newCtx := slogContext.WithLogger(ctx, slog.Default())
+	
+	// getting logger from context
+	logger := slogContext.GetLogger(newCtx)
+}
 ```
 
 ## stackdriver
