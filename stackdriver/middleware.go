@@ -1,6 +1,7 @@
 package stackdriver
 
 import (
+	"github.com/dusted-go/logging/context"
 	"log/slog"
 	"net/http"
 
@@ -51,7 +52,7 @@ func Logging(
 					})
 				}
 				logger := slog.New(reqHandler)
-				ctx = WithLogger(ctx, logger)
+				ctx = context.WithLogger(ctx, logger)
 				r = r.WithContext(ctx)
 				next.ServeHTTP(w, r)
 			},
