@@ -1,17 +1,15 @@
-package stackdriver
+package context
 
 import (
 	"context"
 	"log/slog"
 )
 
-type contextKey int
-
-const loggerKey contextKey = 0
+type loggerKey struct{}
 
 // WithLogger adds a *slog.Logger to the current context.
 func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
-	ctx = context.WithValue(ctx, loggerKey, logger)
+	ctx = context.WithValue(ctx, loggerKey{}, logger)
 	return ctx
 }
 
@@ -20,8 +18,10 @@ func GetLogger(ctx context.Context) *slog.Logger {
 	if ctx == nil {
 		return slog.Default()
 	}
-	if logger, ok := ctx.Value(loggerKey).(*slog.Logger); ok {
+
+	if logger, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok {
 		return logger
 	}
+
 	return slog.Default()
 }
