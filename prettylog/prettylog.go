@@ -38,13 +38,11 @@ const (
 	white        = 97
 )
 
-type encoder uint8
+type encoder string
 
 const (
-	_ encoder = iota
-	JSON
-	YAML
-
+	JSON           = encoder("json")
+	YAML           = encoder("yaml")
 	defaultEncoder = JSON
 )
 
@@ -60,7 +58,7 @@ type Handler struct {
 	writer           io.Writer
 	colorize         bool
 	outputEmptyAttrs bool
-	encoder          encoder
+	e                encoder
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -68,11 +66,11 @@ func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &Handler{h: h.h.WithAttrs(attrs), b: h.b, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize}
+	return &Handler{h: h.h.WithAttrs(attrs), b: h.b, e: h.e, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize}
 }
 
 func (h *Handler) WithGroup(name string) slog.Handler {
-	return &Handler{h: h.h.WithGroup(name), b: h.b, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize}
+	return &Handler{h: h.h.WithGroup(name), b: h.b, e: h.e, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize}
 }
 
 func (h *Handler) computeAttrs(
@@ -162,12 +160,14 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
-		switch h.encoder {
+		switch h.e {
 		case JSON:
 			attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
 		case YAML:
 			attrsAsBytes, err = yaml.Marshal(attrs)
 			attrsAsBytes = append([]byte{'\n'}, attrsAsBytes...)
+		default:
+			return fmt.Errorf("unsupported encoder %q", h.e)
 		}
 		if err != nil {
 			return fmt.Errorf("error when marshaling attrs: %w", err)
@@ -223,14 +223,14 @@ func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 	buf := &bytes.Buffer{}
 	handler := &Handler{
 		b: buf,
+		e: defaultEncoder,
 		h: slog.NewJSONHandler(buf, &slog.HandlerOptions{
 			Level:       handlerOptions.Level,
 			AddSource:   handlerOptions.AddSource,
 			ReplaceAttr: suppressDefaults(handlerOptions.ReplaceAttr),
 		}),
-		r:       handlerOptions.ReplaceAttr,
-		m:       &sync.Mutex{},
-		encoder: defaultEncoder,
+		r: handlerOptions.ReplaceAttr,
+		m: &sync.Mutex{},
 	}
 
 	for _, opt := range options {
@@ -266,6 +266,6 @@ func WithOutputEmptyAttrs() Option {
 
 func WithEncoder(e encoder) Option {
 	return func(h *Handler) {
-		h.encoder = e
+		h.e = e
 	}
 }
