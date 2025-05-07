@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -36,6 +38,16 @@ const (
 	white        = 97
 )
 
+type encoder uint8
+
+const (
+	_ encoder = iota
+	JSON
+	YAML
+
+	defaultEncoder = JSON
+)
+
 func colorizer(colorCode int, v string) string {
 	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(colorCode), v, reset)
 }
@@ -48,6 +60,7 @@ type Handler struct {
 	writer           io.Writer
 	colorize         bool
 	outputEmptyAttrs bool
+	encoder          encoder
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -149,7 +162,13 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
-		attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
+		switch h.encoder {
+		case JSON:
+			attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
+		case YAML:
+			attrsAsBytes, err = yaml.Marshal(attrs)
+			attrsAsBytes = append([]byte{'\n'}, attrsAsBytes...)
+		}
 		if err != nil {
 			return fmt.Errorf("error when marshaling attrs: %w", err)
 		}
@@ -209,8 +228,9 @@ func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 			AddSource:   handlerOptions.AddSource,
 			ReplaceAttr: suppressDefaults(handlerOptions.ReplaceAttr),
 		}),
-		r: handlerOptions.ReplaceAttr,
-		m: &sync.Mutex{},
+		r:       handlerOptions.ReplaceAttr,
+		m:       &sync.Mutex{},
+		encoder: defaultEncoder,
 	}
 
 	for _, opt := range options {
@@ -241,5 +261,11 @@ func WithColor() Option {
 func WithOutputEmptyAttrs() Option {
 	return func(h *Handler) {
 		h.outputEmptyAttrs = true
+	}
+}
+
+func WithEncoder(e encoder) Option {
+	return func(h *Handler) {
+		h.encoder = e
 	}
 }
