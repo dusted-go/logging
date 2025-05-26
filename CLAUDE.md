@@ -37,5 +37,3 @@ This is a Go module providing a `log/slog` handler for development-time logging.
 The handler follows the decorator pattern - it wraps the standard `slog.JSONHandler` and transforms its output rather than implementing logging from scratch.
 
 ## Releasing
-
-- 
