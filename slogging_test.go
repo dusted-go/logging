@@ -33,7 +33,7 @@ func Test_WritesToProvidedStream(t *testing.T) {
 		t.Errorf("expected `testing logger` but found `%s`", line)
 	}
 	if !strings.HasSuffix(line, "\n") {
-		t.Errorf("exected line to be terminated with `\\n` but found `%s`", line[len(line)-1:])
+		t.Errorf("expected line to be terminated with `\\n` but found `%s`", line[len(line)-1:])
 	}
 }
 
@@ -53,7 +53,7 @@ func Test_SkipEmptyAttributes(t *testing.T) {
 		t.Errorf("expected `testing logger` but found `%s`", line)
 	}
 	if !strings.HasSuffix(line, "\n") {
-		t.Errorf("exected line to be terminated with `\\n` but found `%s`", line[len(line)-1:])
+		t.Errorf("expected line to be terminated with `\\n` but found `%s`", line[len(line)-1:])
 	}
 }
 
