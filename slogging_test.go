@@ -57,6 +57,56 @@ func Test_SkipEmptyAttributes(t *testing.T) {
 	}
 }
 
+func Test_WithAttrsPreservesOutputEmptyAttrs(t *testing.T) {
+	cs := &captureStream{}
+	handler := New(nil, WithDestinationWriter(cs), WithOutputEmptyAttrs())
+	logger := slog.New(handler)
+
+	// Create a new logger with additional attributes
+	loggerWithAttrs := logger.With("key", "value")
+
+	// Log a message without any inline attributes
+	loggerWithAttrs.Info("test message")
+
+	// The output should still include empty attrs {} because WithOutputEmptyAttrs was set
+	if len(cs.lines) != 1 {
+		t.Errorf("expected 1 line logged, got: %d", len(cs.lines))
+	}
+
+	line := string(cs.lines[0])
+	// Should see the key:value from With() and empty attrs should still be shown
+	if !strings.Contains(line, `"key": "value"`) {
+		t.Errorf("expected to find key:value in output, got: %s", line)
+	}
+}
+
+func Test_WithGroupPreservesOutputEmptyAttrs(t *testing.T) {
+	// First test: handler without outputEmptyAttrs
+	cs1 := &captureStream{}
+	handler1 := New(nil, WithDestinationWriter(cs1)) // No WithOutputEmptyAttrs
+	logger1 := slog.New(handler1)
+	loggerWithGroup1 := logger1.WithGroup("mygroup")
+	loggerWithGroup1.Info("test message")
+
+	// Second test: handler with outputEmptyAttrs
+	cs2 := &captureStream{}
+	handler2 := New(nil, WithDestinationWriter(cs2), WithOutputEmptyAttrs())
+	logger2 := slog.New(handler2)
+	loggerWithGroup2 := logger2.WithGroup("mygroup")
+	loggerWithGroup2.Info("test message")
+
+	line1 := string(cs1.lines[0])
+	line2 := string(cs2.lines[0])
+
+	t.Logf("Without outputEmptyAttrs: %s", line1)
+	t.Logf("With outputEmptyAttrs: %s", line2)
+
+	// They should be different - one should have {} and one shouldn't
+	if line1 == line2 {
+		t.Errorf("expected different output with and without outputEmptyAttrs, but got same output")
+	}
+}
+
 func Test_Encoder(t *testing.T) {
 	t.Run("json", func(t *testing.T) {
 		buf := bytes.NewBuffer(nil)
