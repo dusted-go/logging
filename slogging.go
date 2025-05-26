@@ -191,9 +191,11 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		out.WriteString(colorize(darkGray, string(attrsAsBytes)))
 	}
 
-	_, err = io.WriteString(h.writer, out.String()+"\n")
-	if err != nil {
-		return err
+	if h.writer != nil {
+		_, err = io.WriteString(h.writer, out.String()+"\n")
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

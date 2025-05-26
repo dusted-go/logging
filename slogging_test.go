@@ -107,6 +107,38 @@ func Test_WithGroupPreservesOutputEmptyAttrs(t *testing.T) {
 	}
 }
 
+func Test_NilWriterHandling(t *testing.T) {
+	t.Run("nil writer should not panic", func(t *testing.T) {
+		// This might panic if not handled properly
+		handler := New(nil, WithDestinationWriter(nil))
+		logger := slog.New(handler)
+		
+		// Try to log something - this could panic with nil writer
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("logging with nil writer panicked: %v", r)
+			}
+		}()
+		
+		logger.Info("test message")
+	})
+	
+	t.Run("default writer should be used if none provided", func(t *testing.T) {
+		// Create handler without specifying a writer
+		handler := New(nil)
+		logger := slog.New(handler)
+		
+		// This should not panic - should use a default writer or handle gracefully
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("logging without writer option panicked: %v", r)
+			}
+		}()
+		
+		logger.Info("test message")
+	})
+}
+
 func Test_Encoder(t *testing.T) {
 	t.Run("json", func(t *testing.T) {
 		buf := bytes.NewBuffer(nil)
