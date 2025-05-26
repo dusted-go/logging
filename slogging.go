@@ -54,43 +54,61 @@ func colorizer(colorCode int, v string) string {
 // colorized log messages for development use. It wraps the standard
 // slog.JSONHandler and transforms its output into a pretty format.
 type Handler struct {
-	h                slog.Handler
-	r                func([]string, slog.Attr) slog.Attr
-	b                *bytes.Buffer
-	m                *sync.Mutex
+	handler          slog.Handler
+	replaceAttrFunc  func([]string, slog.Attr) slog.Attr
+	buffer           *bytes.Buffer
+	mutex            *sync.Mutex
 	writer           io.Writer
 	colorize         bool
 	outputEmptyAttrs bool
-	e                encoder
+	encoder          encoder
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.h.Enabled(ctx, level)
+	return h.handler.Enabled(ctx, level)
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &Handler{h: h.h.WithAttrs(attrs), b: h.b, e: h.e, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize, outputEmptyAttrs: h.outputEmptyAttrs}
+	return &Handler{
+		handler:          h.handler.WithAttrs(attrs),
+		buffer:           h.buffer,
+		encoder:          h.encoder,
+		replaceAttrFunc:  h.replaceAttrFunc,
+		mutex:            h.mutex,
+		writer:           h.writer,
+		colorize:         h.colorize,
+		outputEmptyAttrs: h.outputEmptyAttrs,
+	}
 }
 
 func (h *Handler) WithGroup(name string) slog.Handler {
-	return &Handler{h: h.h.WithGroup(name), b: h.b, e: h.e, r: h.r, m: h.m, writer: h.writer, colorize: h.colorize, outputEmptyAttrs: h.outputEmptyAttrs}
+	return &Handler{
+		handler:          h.handler.WithGroup(name),
+		buffer:           h.buffer,
+		encoder:          h.encoder,
+		replaceAttrFunc:  h.replaceAttrFunc,
+		mutex:            h.mutex,
+		writer:           h.writer,
+		colorize:         h.colorize,
+		outputEmptyAttrs: h.outputEmptyAttrs,
+	}
 }
 
 func (h *Handler) computeAttrs(
 	ctx context.Context,
 	r slog.Record,
 ) (map[string]any, error) {
-	h.m.Lock()
+	h.mutex.Lock()
 	defer func() {
-		h.b.Reset()
-		h.m.Unlock()
+		h.buffer.Reset()
+		h.mutex.Unlock()
 	}()
-	if err := h.h.Handle(ctx, r); err != nil {
+	if err := h.handler.Handle(ctx, r); err != nil {
 		return nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
 	}
 
 	var attrs map[string]any
-	err := json.Unmarshal(h.b.Bytes(), &attrs)
+	err := json.Unmarshal(h.buffer.Bytes(), &attrs)
 	if err != nil {
 		return nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
 	}
@@ -110,8 +128,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.LevelKey,
 		Value: slog.AnyValue(r.Level),
 	}
-	if h.r != nil {
-		levelAttr = h.r([]string{}, levelAttr)
+	if h.replaceAttrFunc != nil {
+		levelAttr = h.replaceAttrFunc([]string{}, levelAttr)
 	}
 
 	if !levelAttr.Equal(slog.Attr{}) {
@@ -137,8 +155,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.TimeKey,
 		Value: slog.StringValue(r.Time.Format(timeFormat)),
 	}
-	if h.r != nil {
-		timeAttr = h.r([]string{}, timeAttr)
+	if h.replaceAttrFunc != nil {
+		timeAttr = h.replaceAttrFunc([]string{}, timeAttr)
 	}
 	if !timeAttr.Equal(slog.Attr{}) {
 		timestamp = colorize(lightGray, timeAttr.Value.String())
@@ -149,8 +167,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		Key:   slog.MessageKey,
 		Value: slog.StringValue(r.Message),
 	}
-	if h.r != nil {
-		msgAttr = h.r([]string{}, msgAttr)
+	if h.replaceAttrFunc != nil {
+		msgAttr = h.replaceAttrFunc([]string{}, msgAttr)
 	}
 	if !msgAttr.Equal(slog.Attr{}) {
 		msg = colorize(white, msgAttr.Value.String())
@@ -163,14 +181,14 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
-		switch h.e {
+		switch h.encoder {
 		case JSON:
 			attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
 		case YAML:
 			attrsAsBytes, err = yaml.Marshal(attrs)
 			attrsAsBytes = append([]byte{'\n'}, attrsAsBytes...)
 		default:
-			return fmt.Errorf("unsupported encoder %q", h.e)
+			return fmt.Errorf("unsupported encoder %q", h.encoder)
 		}
 		if err != nil {
 			return fmt.Errorf("error when marshaling attrs: %w", err)
@@ -230,15 +248,15 @@ func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 
 	buf := &bytes.Buffer{}
 	handler := &Handler{
-		b: buf,
-		e: defaultEncoder,
-		h: slog.NewJSONHandler(buf, &slog.HandlerOptions{
+		buffer:  buf,
+		encoder: defaultEncoder,
+		handler: slog.NewJSONHandler(buf, &slog.HandlerOptions{
 			Level:       handlerOptions.Level,
 			AddSource:   handlerOptions.AddSource,
 			ReplaceAttr: suppressDefaults(handlerOptions.ReplaceAttr),
 		}),
-		r: handlerOptions.ReplaceAttr,
-		m: &sync.Mutex{},
+		replaceAttrFunc: handlerOptions.ReplaceAttr,
+		mutex:           &sync.Mutex{},
 	}
 
 	for _, opt := range options {
@@ -286,6 +304,6 @@ func WithOutputEmptyAttrs() Option {
 // Supported formats are JSON and YAML.
 func WithEncoder(e encoder) Option {
 	return func(h *Handler) {
-		h.e = e
+		h.encoder = e
 	}
 }
