@@ -143,9 +143,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 			level = colorize(lightBlue, level)
 		} else if r.Level < slog.LevelError {
 			level = colorize(lightYellow, level)
-		} else if r.Level <= slog.LevelError+1 {
+		} else if r.Level == slog.LevelError {
 			level = colorize(lightRed, level)
-		} else if r.Level > slog.LevelError+1 {
+		} else {
 			level = colorize(lightMagenta, level)
 		}
 	}
