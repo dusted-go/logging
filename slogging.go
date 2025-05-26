@@ -50,6 +50,9 @@ func colorizer(colorCode int, v string) string {
 	return fmt.Sprintf("\033[%sm%s%s", strconv.Itoa(colorCode), v, reset)
 }
 
+// Handler is a slog.Handler implementation that outputs human-readable,
+// colorized log messages for development use. It wraps the standard
+// slog.JSONHandler and transforms its output into a pretty format.
 type Handler struct {
 	h                slog.Handler
 	r                func([]string, slog.Attr) slog.Attr
@@ -217,6 +220,9 @@ func suppressDefaults(
 	}
 }
 
+// New creates a new Handler with the given options. If handlerOptions is nil,
+// default options are used. Additional configuration can be applied using
+// Option functions.
 func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 	if handlerOptions == nil {
 		handlerOptions = &slog.HandlerOptions{}
@@ -242,30 +248,42 @@ func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
 	return handler
 }
 
+// NewHandler creates a new Handler with sensible defaults for development:
+// - Output to stdout
+// - Colorized output
+// - Empty attributes shown as {}
 func NewHandler(opts *slog.HandlerOptions) *Handler {
 	return New(opts, WithDestinationWriter(os.Stdout), WithColor(), WithOutputEmptyAttrs())
 }
 
+// Option is a function that configures a Handler.
 type Option func(h *Handler)
 
+// WithDestinationWriter sets the writer where log output will be written.
+// If writer is nil, log output will be discarded.
 func WithDestinationWriter(writer io.Writer) Option {
 	return func(h *Handler) {
 		h.writer = writer
 	}
 }
 
+// WithColor enables ANSI color codes in the log output for better readability.
 func WithColor() Option {
 	return func(h *Handler) {
 		h.colorize = true
 	}
 }
 
+// WithOutputEmptyAttrs configures the handler to output empty attribute objects
+// as {} even when no attributes are present in the log record.
 func WithOutputEmptyAttrs() Option {
 	return func(h *Handler) {
 		h.outputEmptyAttrs = true
 	}
 }
 
+// WithEncoder sets the encoding format for log attributes.
+// Supported formats are JSON and YAML.
 func WithEncoder(e encoder) Option {
 	return func(h *Handler) {
 		h.e = e
