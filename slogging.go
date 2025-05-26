@@ -54,10 +54,15 @@ func colorizer(colorCode int, v string) string {
 // colorized log messages for development use. It wraps the standard
 // slog.JSONHandler and transforms its output into a pretty format.
 type Handler struct {
-	handler          slog.Handler
-	replaceAttrFunc  func([]string, slog.Attr) slog.Attr
-	buffer           *bytes.Buffer
-	mutex            *sync.Mutex
+	handler         slog.Handler
+	replaceAttrFunc func([]string, slog.Attr) slog.Attr
+	
+	// Shared state across WithAttrs/WithGroup instances for output synchronization.
+	// This ensures log lines from related handlers don't get interleaved.
+	buffer *bytes.Buffer
+	mutex  *sync.Mutex
+	
+	// Per-handler configuration
 	writer           io.Writer
 	colorize         bool
 	outputEmptyAttrs bool
@@ -303,6 +308,11 @@ func WithOutputEmptyAttrs() Option {
 // Supported formats are JSON and YAML.
 func WithEncoder(e encoder) Option {
 	return func(h *Handler) {
-		h.encoder = e
+		switch e {
+		case JSON, YAML:
+			h.encoder = e
+		default:
+			panic(fmt.Sprintf("slogging: unsupported encoder %q", e))
+		}
 	}
 }
