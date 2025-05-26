@@ -195,25 +195,24 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		}
 	}
 
-	out := strings.Builder{}
+	var parts []string
 	if len(timestamp) > 0 {
-		out.WriteString(timestamp)
-		out.WriteString(" ")
+		parts = append(parts, timestamp)
 	}
 	if len(level) > 0 {
-		out.WriteString(level)
-		out.WriteString(" ")
+		parts = append(parts, level)
 	}
 	if len(msg) > 0 {
-		out.WriteString(msg)
-		out.WriteString(" ")
+		parts = append(parts, msg)
 	}
 	if len(attrsAsBytes) > 0 {
-		out.WriteString(colorize(darkGray, string(attrsAsBytes)))
+		parts = append(parts, colorize(darkGray, string(attrsAsBytes)))
 	}
+	
+	out := strings.Join(parts, " ")
 
 	if h.writer != nil {
-		_, err = io.WriteString(h.writer, out.String()+"\n")
+		_, err = io.WriteString(h.writer, out+"\n")
 		if err != nil {
 			return err
 		}
