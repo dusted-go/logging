@@ -3,12 +3,38 @@ package otel
 import (
 	"context"
 	"log/slog"
+	"strings"
 
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
+// getServiceName extracts the service name from the span's resource.
+// Returns empty string if service name is not available or is the default unknown service.
+func getServiceName(span trace.Span) string {
+	if span == nil {
+		return ""
+	}
+	
+	// Get resource from span (available in newer SDK versions)
+	if spanWithResource, ok := span.(interface{ Resource() *resource.Resource }); ok {
+		if res := spanWithResource.Resource(); res != nil {
+			if serviceName, exists := res.Set().Value(semconv.ServiceNameKey); exists {
+				name := serviceName.AsString()
+				// Skip default unknown service names
+				if name != "" && !strings.HasPrefix(name, "unknown_service:") {
+					return name
+				}
+			}
+		}
+	}
+	
+	return ""
+}
+
 // Handler is a slog.Handler that adds OpenTelemetry trace context
-// (trace_id and span_id) to log records. It wraps another handler and
+// (trace_id, span_id, and service_name) to log records. It wraps another handler and
 // ensures trace attributes are always added at the root level in an "otel" group.
 type Handler struct {
 	handler  slog.Handler
@@ -18,8 +44,8 @@ type Handler struct {
 
 // Wrap creates a new OpenTelemetry-aware handler that wraps
 // the provided handler. When a valid span context is present in the
-// context passed to logging methods, it automatically adds trace_id
-// and span_id attributes at the root level in an "otel" group.
+// context passed to logging methods, it automatically adds trace_id,
+// span_id, and service_name attributes at the root level in an "otel" group.
 func Wrap(handler slog.Handler) *Handler {
 	return &Handler{
 		handler:  handler,
@@ -49,12 +75,17 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	// Add trace attributes if present
 	if span.SpanContext().IsValid() {
-		newRecord.AddAttrs(
-			slog.Group("otel",
-				slog.String("trace_id", span.SpanContext().TraceID().String()),
-				slog.String("span_id", span.SpanContext().SpanID().String()),
-			),
-		)
+		otelAttrs := []any{
+			slog.String("trace_id", span.SpanContext().TraceID().String()),
+			slog.String("span_id", span.SpanContext().SpanID().String()),
+		}
+		
+		// Add service name if available
+		if serviceName := getServiceName(span); serviceName != "" {
+			otelAttrs = append(otelAttrs, slog.String("service_name", serviceName))
+		}
+		
+		newRecord.AddAttrs(slog.Group("otel", otelAttrs...))
 	}
 
 	// Add any pre-attrs

@@ -7,14 +7,27 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
 func Test_OtelHandler(t *testing.T) {
 	t.Run("logs with valid span context should include trace_id and span_id", func(t *testing.T) {
-		// Create a tracer provider and tracer
-		tp := sdktrace.NewTracerProvider()
+		// Create a tracer provider and tracer with service name
+		res, err := resource.New(context.Background(),
+			resource.WithAttributes(
+				semconv.ServiceName("test-service"),
+			),
+		)
+		if err != nil {
+			t.Fatalf("failed to create resource: %v", err)
+		}
+		
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+		)
 		tracer := tp.Tracer("test-tracer")
 
 		// Create capture stream and base handler
@@ -46,12 +59,15 @@ func Test_OtelHandler(t *testing.T) {
 		expectedTraceID := spanContext.TraceID().String()
 		expectedSpanID := spanContext.SpanID().String()
 
-		// Check that otel.trace_id and otel.span_id are present in the output
+		// Check that otel.trace_id, otel.span_id, and otel.service_name are present in the output
 		if !strings.Contains(lines[0], `otel.trace_id=`+expectedTraceID) {
 			t.Errorf("expected otel.trace_id=%s in output, got: %s", expectedTraceID, lines[0])
 		}
 		if !strings.Contains(lines[0], `otel.span_id=`+expectedSpanID) {
 			t.Errorf("expected otel.span_id=%s in output, got: %s", expectedSpanID, lines[0])
+		}
+		if !strings.Contains(lines[0], `otel.service_name=test-service`) {
+			t.Errorf("expected otel.service_name=test-service in output, got: %s", lines[0])
 		}
 	})
 
@@ -119,8 +135,19 @@ func Test_OtelHandler(t *testing.T) {
 	})
 
 	t.Run("trace attributes should be at root level with groups", func(t *testing.T) {
-		// Create a tracer provider and tracer
-		tp := sdktrace.NewTracerProvider()
+		// Create a tracer provider and tracer with service name
+		res, err := resource.New(context.Background(),
+			resource.WithAttributes(
+				semconv.ServiceName("grouped-service"),
+			),
+		)
+		if err != nil {
+			t.Fatalf("failed to create resource: %v", err)
+		}
+		
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+		)
 		tracer := tp.Tracer("test-tracer")
 
 		// Create capture stream and base handler
@@ -150,12 +177,15 @@ func Test_OtelHandler(t *testing.T) {
 			t.Fatalf("expected 1 line logged, got: %d", len(lines))
 		}
 
-		// Verify trace_id and span_id are present at root level (otel.trace_id format)
+		// Verify trace_id, span_id, and service_name are present at root level (otel.* format)
 		if !strings.Contains(lines[0], `otel.trace_id=`) {
 			t.Errorf("otel.trace_id missing from output: %s", lines[0])
 		}
 		if !strings.Contains(lines[0], `otel.span_id=`) {
 			t.Errorf("otel.span_id missing from output: %s", lines[0])
+		}
+		if !strings.Contains(lines[0], `otel.service_name=grouped-service`) {
+			t.Errorf("otel.service_name missing from output: %s", lines[0])
 		}
 
 		// Verify the grouped attribute is present with dot notation
@@ -171,6 +201,78 @@ func Test_OtelHandler(t *testing.T) {
 		}
 		if strings.Contains(lines[0], `mygroup.otel.span_id=`) {
 			t.Errorf("span_id should NOT be inside mygroup, but found mygroup.otel.span_id in output: %s", lines[0])
+		}
+	})
+
+	t.Run("service name should be included when available", func(t *testing.T) {
+		// Create tracer provider with service name
+		res, err := resource.New(context.Background(),
+			resource.WithAttributes(
+				semconv.ServiceName("my-service"),
+			),
+		)
+		if err != nil {
+			t.Fatalf("failed to create resource: %v", err)
+		}
+		
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+		)
+		tracer := tp.Tracer("test-tracer")
+
+		buf := new(bytes.Buffer)
+		baseHandler := slog.NewTextHandler(buf, nil)
+		handler := Wrap(baseHandler)
+		logger := slog.New(handler)
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		logger.InfoContext(ctx, "test message")
+
+		output := strings.TrimSuffix(buf.String(), "\n")
+		lines := strings.Split(output, "\n")
+
+		if len(lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(lines))
+		}
+
+		if !strings.Contains(lines[0], `otel.service_name=my-service`) {
+			t.Errorf("expected otel.service_name=my-service in output, got: %s", lines[0])
+		}
+	})
+
+	t.Run("service name should not be included when using default unknown service", func(t *testing.T) {
+		// Create tracer provider without explicit service name (will use default unknown_service)
+		tp := sdktrace.NewTracerProvider()
+		tracer := tp.Tracer("test-tracer")
+
+		buf := new(bytes.Buffer)
+		baseHandler := slog.NewTextHandler(buf, nil)
+		handler := Wrap(baseHandler)
+		logger := slog.New(handler)
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		logger.InfoContext(ctx, "test message")
+
+		output := strings.TrimSuffix(buf.String(), "\n")
+		lines := strings.Split(output, "\n")
+
+		if len(lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(lines))
+		}
+
+		// Should have trace_id and span_id but not service_name (since it's unknown_service)
+		if !strings.Contains(lines[0], `otel.trace_id=`) {
+			t.Errorf("expected otel.trace_id in output, got: %s", lines[0])
+		}
+		if !strings.Contains(lines[0], `otel.span_id=`) {
+			t.Errorf("expected otel.span_id in output, got: %s", lines[0])
+		}
+		if strings.Contains(lines[0], `otel.service_name=`) {
+			t.Errorf("unexpected otel.service_name in output (should skip unknown_service): %s", lines[0])
 		}
 	})
 }
