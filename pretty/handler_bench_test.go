@@ -1,4 +1,4 @@
-package slogging
+package pretty
 
 import (
 	"bytes"
@@ -43,9 +43,7 @@ func BenchmarkHandlers(b *testing.B) {
 
 	b.Run("SloggingHandler", func(b *testing.B) {
 		buf := &bytes.Buffer{}
-		handler := New(&slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}, WithDestinationWriter(buf))
+		handler := NewHandler(WithWriter(buf), WithLevel(slog.LevelInfo))
 		logger := slog.New(handler)
 
 		b.ResetTimer()
@@ -57,9 +55,7 @@ func BenchmarkHandlers(b *testing.B) {
 
 	b.Run("SloggingHandlerWithColor", func(b *testing.B) {
 		buf := &bytes.Buffer{}
-		handler := New(&slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}, WithDestinationWriter(buf), WithColor())
+		handler := NewHandler(WithWriter(buf), WithLevel(slog.LevelInfo), WithColor())
 		logger := slog.New(handler)
 
 		b.ResetTimer()
@@ -71,9 +67,7 @@ func BenchmarkHandlers(b *testing.B) {
 
 	b.Run("SloggingHandlerYAML", func(b *testing.B) {
 		buf := &bytes.Buffer{}
-		handler := New(&slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}, WithDestinationWriter(buf), WithEncoder(YAML))
+		handler := NewHandler(WithWriter(buf), WithLevel(slog.LevelInfo), WithEncoder(YAML))
 		logger := slog.New(handler)
 
 		b.ResetTimer()
@@ -84,9 +78,7 @@ func BenchmarkHandlers(b *testing.B) {
 	})
 
 	b.Run("SloggingHandlerDiscard", func(b *testing.B) {
-		handler := New(&slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}, WithDestinationWriter(io.Discard))
+		handler := NewHandler(WithWriter(io.Discard), WithLevel(slog.LevelInfo))
 		logger := slog.New(handler)
 
 		b.ResetTimer()
@@ -99,9 +91,7 @@ func BenchmarkHandlers(b *testing.B) {
 // BenchmarkLogLevels tests performance across different log levels
 func BenchmarkLogLevels(b *testing.B) {
 	buf := &bytes.Buffer{}
-	handler := New(&slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}, WithDestinationWriter(buf), WithColor())
+	handler := NewHandler(WithWriter(buf), WithLevel(slog.LevelDebug), WithColor())
 	logger := slog.New(handler)
 
 	testMessage := "benchmark message"
@@ -143,9 +133,7 @@ func BenchmarkLogLevels(b *testing.B) {
 // BenchmarkAttributeCounts tests performance with different numbers of attributes
 func BenchmarkAttributeCounts(b *testing.B) {
 	buf := &bytes.Buffer{}
-	handler := New(&slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}, WithDestinationWriter(buf))
+	handler := NewHandler(WithLevel(slog.LevelInfo), WithWriter(buf))
 	logger := slog.New(handler)
 
 	testMessage := "benchmark message"

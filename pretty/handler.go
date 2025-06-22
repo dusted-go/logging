@@ -1,4 +1,4 @@
-package slogging
+package pretty
 
 import (
 	"bytes"
@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 
-	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,11 +37,11 @@ const (
 	white        = 97
 )
 
-type encoder string
+type Encoder string
 
 const (
-	JSON           = encoder("json")
-	YAML           = encoder("yaml")
+	JSON           = Encoder("json")
+	YAML           = Encoder("yaml")
 	defaultEncoder = JSON
 )
 
@@ -67,7 +65,7 @@ type Handler struct {
 	writer           io.Writer
 	colorize         bool
 	outputEmptyAttrs bool
-	encoder          encoder
+	encoder          Encoder
 }
 
 func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -100,10 +98,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func (h *Handler) computeAttrs(
-	ctx context.Context,
-	r slog.Record,
-) (map[string]any, error) {
+func (h *Handler) computeAttrs(ctx context.Context, r slog.Record) (map[string]any, error) {
 	h.mutex.Lock()
 	defer func() {
 		h.buffer.Reset()
@@ -185,12 +180,6 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 
-	// Add trace attributes at root level if present
-	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		attrs["trace_id"] = span.SpanContext().TraceID().String()
-		attrs["span_id"] = span.SpanContext().SpanID().String()
-	}
-
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
 		switch h.encoder {
@@ -249,77 +238,93 @@ func suppressDefaults(
 	}
 }
 
-// New creates a new Handler with the given options. If handlerOptions is nil,
+type handlerOptions struct {
+	slog.HandlerOptions
+	writer           io.Writer
+	encoder          Encoder
+	colorize         bool
+	outputEmptyAttrs bool
+}
+
+// NewHandler creates a new Handler with the given options. If handlerOptions is nil,
 // default options are used. Additional configuration can be applied using
 // Option functions.
-func New(handlerOptions *slog.HandlerOptions, options ...Option) *Handler {
-	if handlerOptions == nil {
-		handlerOptions = &slog.HandlerOptions{}
+func NewHandler(options ...Option) *Handler {
+	config := handlerOptions{
+		writer:  io.Discard,
+		encoder: defaultEncoder,
+	}
+	for _, opt := range options {
+		if opt != nil {
+			opt(&config)
+		}
 	}
 
 	buf := &bytes.Buffer{}
 	handler := &Handler{
-		buffer:  buf,
-		encoder: defaultEncoder,
+		buffer:           buf,
+		writer:           config.writer,
+		encoder:          config.encoder,
+		colorize:         config.colorize,
+		outputEmptyAttrs: config.outputEmptyAttrs,
 		handler: slog.NewJSONHandler(buf, &slog.HandlerOptions{
-			Level:       handlerOptions.Level,
-			AddSource:   handlerOptions.AddSource,
-			ReplaceAttr: suppressDefaults(handlerOptions.ReplaceAttr),
+			Level:       config.Level,
+			AddSource:   config.AddSource,
+			ReplaceAttr: suppressDefaults(config.ReplaceAttr),
 		}),
-		replaceAttrFunc: handlerOptions.ReplaceAttr,
+		replaceAttrFunc: config.ReplaceAttr,
 		mutex:           &sync.Mutex{},
-	}
-
-	for _, opt := range options {
-		opt(handler)
 	}
 
 	return handler
 }
 
-// NewHandler creates a new Handler with sensible defaults for development:
-// - Output to stdout
-// - Colorized output
-// - Empty attributes shown as {}
-func NewHandler(opts *slog.HandlerOptions) *Handler {
-	return New(opts, WithDestinationWriter(os.Stdout), WithColor(), WithOutputEmptyAttrs())
-}
-
 // Option is a function that configures a Handler.
-type Option func(h *Handler)
+type Option func(h *handlerOptions)
 
-// WithDestinationWriter sets the writer where log output will be written.
+// WithWriter sets the writer where log output will be written.
 // If writer is nil, log output will be discarded.
-func WithDestinationWriter(writer io.Writer) Option {
-	return func(h *Handler) {
+func WithWriter(writer io.Writer) Option {
+	return func(h *handlerOptions) {
 		h.writer = writer
 	}
 }
 
 // WithColor enables ANSI color codes in the log output for better readability.
-func WithColor() Option {
-	return func(h *Handler) {
-		h.colorize = true
+func WithColor(x ...bool) Option {
+	return func(h *handlerOptions) {
+		for i := range x {
+			h.colorize = x[i]
+		}
 	}
 }
 
 // WithOutputEmptyAttrs configures the handler to output empty attribute objects
 // as {} even when no attributes are present in the log record.
-func WithOutputEmptyAttrs() Option {
-	return func(h *Handler) {
-		h.outputEmptyAttrs = true
+func WithOutputEmptyAttrs(x ...bool) Option {
+	return func(h *handlerOptions) {
+		for i := range x {
+			h.outputEmptyAttrs = x[i]
+		}
 	}
 }
 
 // WithEncoder sets the encoding format for log attributes.
 // Supported formats are JSON and YAML.
-func WithEncoder(e encoder) Option {
-	return func(h *Handler) {
+func WithEncoder(e Encoder) Option {
+	return func(h *handlerOptions) {
 		switch e {
 		case JSON, YAML:
 			h.encoder = e
 		default:
 			panic(fmt.Sprintf("slogging: unsupported encoder %q", e))
 		}
+	}
+}
+
+// WithLevel sets the minimum log level for the handler.
+func WithLevel(lvl slog.Leveler) Option {
+	return func(h *handlerOptions) {
+		h.Level = lvl
 	}
 }
