@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,12 +57,12 @@ func colorizer(colorCode int, v string) string {
 type Handler struct {
 	handler         slog.Handler
 	replaceAttrFunc func([]string, slog.Attr) slog.Attr
-	
+
 	// Shared state across WithAttrs/WithGroup instances for output synchronization.
 	// This ensures log lines from related handlers don't get interleaved.
 	buffer *bytes.Buffer
 	mutex  *sync.Mutex
-	
+
 	// Per-handler configuration
 	writer           io.Writer
 	colorize         bool
@@ -184,6 +185,12 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 
+	// Add trace attributes at root level if present
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		attrs["trace_id"] = span.SpanContext().TraceID().String()
+		attrs["span_id"] = span.SpanContext().SpanID().String()
+	}
+
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
 		switch h.encoder {
@@ -213,7 +220,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	if len(attrsAsBytes) > 0 {
 		parts = append(parts, colorize(darkGray, string(attrsAsBytes)))
 	}
-	
+
 	out := strings.Join(parts, " ")
 
 	if h.writer != nil {

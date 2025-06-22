@@ -2,10 +2,14 @@ package slogging
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"regexp"
 	"strings"
 	"testing"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type captureStream struct {
@@ -112,29 +116,29 @@ func Test_NilWriterHandling(t *testing.T) {
 		// This might panic if not handled properly
 		handler := New(nil, WithDestinationWriter(nil))
 		logger := slog.New(handler)
-		
+
 		// Try to log something - this could panic with nil writer
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("logging with nil writer panicked: %v", r)
 			}
 		}()
-		
+
 		logger.Info("test message")
 	})
-	
+
 	t.Run("default writer should be used if none provided", func(t *testing.T) {
 		// Create handler without specifying a writer
 		handler := New(nil)
 		logger := slog.New(handler)
-		
+
 		// This should not panic - should use a default writer or handle gracefully
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("logging without writer option panicked: %v", r)
 			}
 		}()
-		
+
 		logger.Info("test message")
 	})
 }
@@ -177,6 +181,179 @@ func Test_Encoder(t *testing.T) {
 		}
 		if lines[2] != "key2: value2" {
 			t.Errorf("expected `key2: value2` but found `%s`", lines[2])
+		}
+	})
+}
+
+func Test_OpenTelemetrySpanContext(t *testing.T) {
+	t.Run("otel span context", func(t *testing.T) {
+		// Create a tracer provider and tracer
+		tp := sdktrace.NewTracerProvider()
+		tracer := tp.Tracer("test-tracer")
+
+		// Create capture stream and handler
+		cs := &captureStream{}
+		handler := New(nil, WithDestinationWriter(cs), WithOutputEmptyAttrs())
+		logger := slog.New(handler)
+
+		// Start a span and log within its context
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		// Log with the span context
+		logger.InfoContext(ctx, "test message with tracing")
+
+		// Verify log output
+		if len(cs.lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(cs.lines))
+		}
+
+		line := string(cs.lines[0])
+		t.Logf("Log output: %s", line)
+
+		// Extract span context to get expected values
+		spanContext := span.SpanContext()
+		expectedTraceID := spanContext.TraceID().String()
+		expectedSpanID := spanContext.SpanID().String()
+
+		// Check that trace_id and span_id are present in the output
+		if !strings.Contains(line, `"trace_id": "`+expectedTraceID+`"`) {
+			t.Errorf("expected trace_id %s in output, got: %s", expectedTraceID, line)
+		}
+		if !strings.Contains(line, `"span_id": "`+expectedSpanID+`"`) {
+			t.Errorf("expected span_id %s in output, got: %s", expectedSpanID, line)
+		}
+	})
+
+	t.Run("logs without span context should not include trace_id and span_id", func(t *testing.T) {
+		// Create capture stream and handler
+		cs := &captureStream{}
+		handler := New(nil, WithDestinationWriter(cs), WithOutputEmptyAttrs())
+		logger := slog.New(handler)
+
+		// Log without span context
+		logger.Info("test message without tracing")
+
+		// Verify log output
+		if len(cs.lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(cs.lines))
+		}
+
+		line := string(cs.lines[0])
+		t.Logf("Log output: %s", line)
+
+		// Check that trace_id and span_id are NOT present
+		if strings.Contains(line, `"trace_id"`) {
+			t.Errorf("unexpected trace_id in output: %s", line)
+		}
+		if strings.Contains(line, `"span_id"`) {
+			t.Errorf("unexpected span_id in output: %s", line)
+		}
+	})
+
+	t.Run("logs with invalid span context should not include trace_id and span_id", func(t *testing.T) {
+		// Create capture stream and handler
+		cs := &captureStream{}
+		handler := New(nil, WithDestinationWriter(cs), WithOutputEmptyAttrs())
+		logger := slog.New(handler)
+
+		// Create a context with an invalid span (no-op span)
+		ctx := trace.ContextWithSpan(context.Background(), trace.SpanFromContext(context.Background()))
+
+		// Log with invalid span context
+		logger.InfoContext(ctx, "test message with invalid span")
+
+		// Verify log output
+		if len(cs.lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(cs.lines))
+		}
+
+		line := string(cs.lines[0])
+		t.Logf("Log output: %s", line)
+
+		// Check that trace_id and span_id are NOT present
+		if strings.Contains(line, `"trace_id"`) {
+			t.Errorf("unexpected trace_id in output: %s", line)
+		}
+		if strings.Contains(line, `"span_id"`) {
+			t.Errorf("unexpected span_id in output: %s", line)
+		}
+	})
+
+	t.Run("trace attributes should be at root level with groups", func(t *testing.T) {
+		// Create a tracer provider and tracer
+		tp := sdktrace.NewTracerProvider()
+		tracer := tp.Tracer("test-tracer")
+
+		// Create capture stream and handler
+		cs := &captureStream{}
+		handler := New(nil, WithDestinationWriter(cs))
+		logger := slog.New(handler)
+
+		// Create logger with group
+		groupedLogger := logger.WithGroup("mygroup")
+
+		// Start a span and log within its context
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		// Log with the span context using grouped logger
+		groupedLogger.InfoContext(ctx, "test message", "key", "value")
+
+		// Verify log output
+		if len(cs.lines) != 1 {
+			t.Fatalf("expected 1 line logged, got: %d", len(cs.lines))
+		}
+
+		line := string(cs.lines[0])
+		t.Logf("Log output: %s", line)
+
+		// Verify trace_id and span_id are present
+		if !strings.Contains(line, `"trace_id":`) {
+			t.Errorf("trace_id missing from output")
+		}
+		if !strings.Contains(line, `"span_id":`) {
+			t.Errorf("span_id missing from output")
+		}
+
+		// Verify they are at root level by checking the JSON structure
+		// The output should have mygroup as a separate object at root level
+		if !strings.Contains(line, `"mygroup": {`) {
+			t.Errorf("mygroup missing from output")
+		}
+
+		// Extract just the mygroup content to verify trace attrs are NOT inside it
+		groupStart := strings.Index(line, `"mygroup": {`)
+		if groupStart != -1 {
+			// Find the matching closing brace for mygroup
+			braceCount := 0
+			inGroup := false
+			groupContent := ""
+			for i := groupStart; i < len(line); i++ {
+				if line[i] == '{' {
+					braceCount++
+					inGroup = true
+				} else if line[i] == '}' {
+					braceCount--
+					if braceCount == 0 && inGroup {
+						groupContent = line[groupStart : i+1]
+						break
+					}
+				}
+			}
+
+			// Verify trace attributes are NOT in the group content
+			if strings.Contains(groupContent, `"trace_id"`) {
+				t.Errorf("trace_id should NOT be inside mygroup, but it is. Group content: %s", groupContent)
+			}
+			if strings.Contains(groupContent, `"span_id"`) {
+				t.Errorf("span_id should NOT be inside mygroup, but it is. Group content: %s", groupContent)
+			}
+
+			// Verify the group only contains the expected key
+			if !strings.Contains(groupContent, `"key": "value"`) {
+				t.Errorf("mygroup should contain key:value")
+			}
 		}
 	})
 }
