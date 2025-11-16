@@ -1,6 +1,11 @@
 Release Notes
 =============
 
+# 2.0.0-alpha-01
+
+- Separated the log context logic from the `stackdriver` package.
+- Added a new middleware `httplogger` which decorates the `slog.Handler` with OTel attributes for traces and the request ID and optionally emits a request log.
+
 # 1.3.0
 
 - Added a new option called `WithOutputEmptyAttrs` to enable the writing of empty `Attrs`. This is enabled by default for backwards compatibility.

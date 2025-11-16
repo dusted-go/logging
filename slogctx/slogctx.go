@@ -1,4 +1,4 @@
-package stackdriver
+package slogctx
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 	return ctx
 }
 
-// GetLogger gets a *slog.Logger from context or returns the default one.
+// GetLogger gets a *slog.Logger from context or returns slog.Default().
 func GetLogger(ctx context.Context) *slog.Logger {
 	if ctx == nil {
 		return slog.Default()
