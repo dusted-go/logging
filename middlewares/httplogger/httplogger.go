@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dusted-go/logging/slogctx"
+	"github.com/dusted-go/logging/v2/slogctx"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 )

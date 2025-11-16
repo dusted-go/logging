@@ -1,4 +1,4 @@
-module github.com/dusted-go/logging
+module github.com/dusted-go/logging/v2
 
 go 1.23.0
 
