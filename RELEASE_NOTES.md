@@ -1,7 +1,7 @@
 Release Notes
 =============
 
-# 2.0.0-alpha-01
+# 2.0.0-rc-01
 
 - Separated the log context logic from the `stackdriver` package.
 - Added a new middleware `httplogger` which decorates the `slog.Handler` with OTel attributes for traces and the request ID and optionally emits a request log.
