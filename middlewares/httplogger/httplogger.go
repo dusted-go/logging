@@ -13,13 +13,10 @@ import (
 type HandlerFactory func() slog.Handler
 
 func RequestScoped(
-	handlerFactory HandlerFactory,
+	baseHandler slog.Handler,
 	addTrace bool,
 	logRequest bool,
 ) func(http.Handler) http.Handler {
-	// Create a base/clean handler to clone for each request.
-	handler := handlerFactory()
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(
 			func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +30,7 @@ func RequestScoped(
 				}
 
 				// Create a request-scoped handler with request ID.
-				reqHandler := handler.WithAttrs(
+				reqHandler := baseHandler.WithAttrs(
 					[]slog.Attr{slog.String("request.id", requestID)})
 
 				// Add trace IDs if requested and available.

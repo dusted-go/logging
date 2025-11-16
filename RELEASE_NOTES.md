@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+# 2.0.0-rc-02
+
+- Changed the `httplogger.RequestScoped` signature to accept a base `slog.Handler` rather than a handler factory.
+
 # 2.0.0-rc-01
 
 - Separated the log context logic from the `stackdriver` package.
