@@ -136,6 +136,27 @@ func RequestScoped(
 						}
 					}
 
+					// Iterate over all request headers and add them as attributes,
+					// excluding any headers in the excludeHeaders list.
+					excludeMap := make(map[string]struct{}, len(excludeHeaders))
+					for _, h := range excludeHeaders {
+						excludeMap[strings.ToLower(h)] = struct{}{}
+					}
+
+					for name, values := range r.Header {
+						lowerName := strings.ToLower(name)
+						if _, excluded := excludeMap[lowerName]; excluded {
+							continue
+						}
+						// Join multiple header values with a comma, as per RFC 7230.
+						joinedValues := strings.Join(values, ",")
+						attrKey := fmt.Sprintf("http.request.header.%s", lowerName)
+						requestAttrs = append(
+							requestAttrs,
+							slog.String(attrKey, joinedValues),
+						)
+					}
+
 					logger.Info(
 						"Processing HTTP request",
 						requestAttrs...)
