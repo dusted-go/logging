@@ -1,6 +1,11 @@
 Release Notes
 =============
 
+# 2.0.0-rc-03
+
+- Fixed request log attributes to correct Otel convention
+- Included request headers except ones specifically excluded
+
 # 2.0.0-rc-02
 
 - Changed the `httplogger.RequestScoped` signature to accept a base `slog.Handler` rather than a handler factory.
