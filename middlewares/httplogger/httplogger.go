@@ -13,14 +13,21 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type HandlerFactory func() slog.Handler
+// Config holds configuration for the RequestScoped middleware.
+type Config struct {
+	// BaseHandler is the base slog.Handler to use for the request logger.
+	// If nil, the default logger's handler is used.
+	BaseHandler slog.Handler
+	// AddTrace determines whether to add trace IDs to the logger.
+	AddTrace bool
+	// LogRequest determines whether to log HTTP request metadata.
+	LogRequest bool
+	// ExcludeHeaders is a list of headers to exclude from logging.
+	ExcludeHeaders []string
+}
 
-func RequestScoped(
-	baseHandler slog.Handler,
-	addTrace bool,
-	logRequest bool,
-	excludeHeaders []string,
-) func(http.Handler) http.Handler {
+// RequestScoped creates a middleware that adds a request-scoped logger to the context.
+func RequestScoped(cfg Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(
 			func(w http.ResponseWriter, r *http.Request) {
@@ -33,12 +40,19 @@ func RequestScoped(
 					requestID = uuid.NewString()
 				}
 
+				var handler slog.Handler
+				if cfg.BaseHandler != nil {
+					handler = cfg.BaseHandler
+				} else {
+					handler = slog.Default().Handler()
+				}
+
 				// Create a request-scoped handler with request ID.
-				reqHandler := baseHandler.WithAttrs(
+				reqHandler := handler.WithAttrs(
 					[]slog.Attr{slog.String("request.id", requestID)})
 
 				// Add trace IDs if requested and available.
-				if addTrace {
+				if cfg.AddTrace {
 					span := trace.SpanFromContext(ctx).SpanContext()
 					if span.IsValid() {
 						reqHandler = reqHandler.WithAttrs([]slog.Attr{
@@ -54,118 +68,160 @@ func RequestScoped(
 				r = r.WithContext(ctx)
 
 				// Optionally log HTTP request metadata.
-				if logRequest {
-					// Log according to OpenTelemetry HTTP Server Semantic Conventions:
-					// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
-					host, port := firstHostPort(
-						r.Header.Get("X-Forwarded-Host"),
-						r.Host,
-					)
-
-					scheme := r.Header.Get("X-Forwarded-Proto")
-					if scheme == "" && r.TLS != nil {
-						scheme = "https"
-					} else if scheme == "" {
-						scheme = "http"
-					}
-
-					if port == -1 {
-						switch scheme {
-						case "https":
-							port = 443
-						case "http":
-							port = 80
-						}
-					}
-
-					clientAddress, clientPort := firstHostPort(
-						r.Header.Get("X-Real-IP"),
-						parseXForwardedFor(r.Header.Get("X-Forwarded-For")),
-						r.RemoteAddr,
-					)
-
-					networkProtocol := "http"
-					networkProtocolVersion := fmt.Sprintf("%d.%d", r.ProtoMajor, r.ProtoMinor)
-					protoName, protoVersion, ok := strings.Cut(r.Proto, "/")
-					if ok {
-						networkProtocol = strings.ToLower(protoName)
-						networkProtocolVersion = protoVersion
-					}
-
-					urlQuery := r.URL.Query().Encode()
-
-					requestAttrs := []any{
-						slog.String("server.address", host),
-						slog.Int("server.port", port),
-						slog.String("network.protocol.name", networkProtocol),
-						slog.String("network.protocol.version", networkProtocolVersion),
-						slog.String("http.request.method", r.Method),
-						slog.Int64("http.request.size", r.ContentLength),
-						slog.String("url.path", r.URL.Path),
-						slog.String("url.scheme", scheme),
-						slog.String("user_agent.original", r.UserAgent()),
-						slog.String("client.address", clientAddress),
-					}
-
-					if clientPort != -1 {
-						requestAttrs = append(
-							requestAttrs,
-							slog.Int("client.port", clientPort),
-						)
-					}
-
-					if urlQuery != "" {
-						requestAttrs = append(
-							requestAttrs,
-							slog.String("url.query", "?"+urlQuery),
-						)
-					}
-
-					peer, peerPort := splitHostPort(r.RemoteAddr)
-					if peer != "" {
-						requestAttrs = append(
-							requestAttrs,
-							slog.String("network.peer.address", peer),
-						)
-
-						if peerPort != -1 {
-							requestAttrs = append(
-								requestAttrs,
-								slog.Int("network.peer.port", peerPort),
-							)
-						}
-					}
-
-					// Iterate over all request headers and add them as attributes,
-					// excluding any headers in the excludeHeaders list.
-					excludeMap := make(map[string]struct{}, len(excludeHeaders))
-					for _, h := range excludeHeaders {
-						excludeMap[strings.ToLower(h)] = struct{}{}
-					}
-
-					for name, values := range r.Header {
-						lowerName := strings.ToLower(name)
-						if _, excluded := excludeMap[lowerName]; excluded {
-							continue
-						}
-						// Join multiple header values with a comma, as per RFC 7230.
-						joinedValues := strings.Join(values, ",")
-						attrKey := fmt.Sprintf("http.request.header.%s", lowerName)
-						requestAttrs = append(
-							requestAttrs,
-							slog.String(attrKey, joinedValues),
-						)
-					}
-
-					logger.Info(
-						"Processing HTTP request",
-						requestAttrs...)
+				if cfg.LogRequest {
+					attrs := requestAttributes(r, cfg.ExcludeHeaders)
+					logger.Info("Processing HTTP request", attrs...)
 				}
 
 				next.ServeHTTP(w, r)
 			},
 		)
 	}
+}
+
+// requestAttributes extracts attributes from the HTTP request.
+// It follows OpenTelemetry HTTP Server Semantic Conventions.
+func requestAttributes(r *http.Request, excludeHeaders []string) []any {
+	// Log according to OpenTelemetry HTTP Server Semantic Conventions:
+	// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
+
+	// Handle Forwarded header (RFC 7239)
+	forwarded := ParseForwarded(r.Header.Get("Forwarded"))
+
+	// Determine Host and Port
+	// Priority: Forwarded > X-Forwarded-Host > Host header
+	host := ""
+	port := -1
+
+	if len(forwarded) > 0 && forwarded[0].Host != "" {
+		host, port = splitHostPort(forwarded[0].Host)
+	}
+
+	if host == "" {
+		host, port = firstHostPort(
+			r.Header.Get("X-Forwarded-Host"),
+			r.Host,
+		)
+	}
+
+	// Determine Scheme
+	// Priority: Forwarded > X-Forwarded-Proto > TLS > Default (http)
+	scheme := ""
+	if len(forwarded) > 0 && forwarded[0].Proto != "" {
+		scheme = forwarded[0].Proto
+	}
+	if scheme == "" {
+		scheme = r.Header.Get("X-Forwarded-Proto")
+	}
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	// Infer port from scheme if missing
+	if port == -1 {
+		switch scheme {
+		case "https":
+			port = 443
+		case "http":
+			port = 80
+		}
+	}
+
+	// Determine Client Address
+	// Priority: Forwarded > X-Real-IP > X-Forwarded-For > RemoteAddr
+	clientAddress := ""
+	clientPort := -1
+
+	if len(forwarded) > 0 && forwarded[0].For != "" {
+		clientAddress, clientPort = splitHostPort(forwarded[0].For)
+	}
+
+	if clientAddress == "" {
+		clientAddress, clientPort = firstHostPort(
+			r.Header.Get("X-Real-IP"),
+			parseXForwardedFor(r.Header.Get("X-Forwarded-For")),
+			r.RemoteAddr,
+		)
+	}
+
+	networkProtocol := "http"
+	networkProtocolVersion := fmt.Sprintf("%d.%d", r.ProtoMajor, r.ProtoMinor)
+	protoName, protoVersion, ok := strings.Cut(r.Proto, "/")
+	if ok {
+		networkProtocol = strings.ToLower(protoName)
+		networkProtocolVersion = protoVersion
+	}
+
+	urlQuery := r.URL.Query().Encode()
+
+	requestAttrs := []any{
+		slog.String("server.address", host),
+		slog.Int("server.port", port),
+		slog.String("network.protocol.name", networkProtocol),
+		slog.String("network.protocol.version", networkProtocolVersion),
+		slog.String("http.request.method", r.Method),
+		slog.Int64("http.request.size", r.ContentLength),
+		slog.String("url.path", r.URL.Path),
+		slog.String("url.scheme", scheme),
+		slog.String("user_agent.original", r.UserAgent()),
+		slog.String("client.address", clientAddress),
+	}
+
+	if clientPort != -1 {
+		requestAttrs = append(
+			requestAttrs,
+			slog.Int("client.port", clientPort),
+		)
+	}
+
+	if urlQuery != "" {
+		requestAttrs = append(
+			requestAttrs,
+			slog.String("url.query", "?"+urlQuery),
+		)
+	}
+
+	peer, peerPort := splitHostPort(r.RemoteAddr)
+	if peer != "" {
+		requestAttrs = append(
+			requestAttrs,
+			slog.String("network.peer.address", peer),
+		)
+
+		if peerPort != -1 {
+			requestAttrs = append(
+				requestAttrs,
+				slog.Int("network.peer.port", peerPort),
+			)
+		}
+	}
+
+	// Iterate over all request headers and add them as attributes,
+	// excluding any headers in the excludeHeaders list.
+	excludeMap := make(map[string]struct{}, len(excludeHeaders))
+	for _, h := range excludeHeaders {
+		excludeMap[strings.ToLower(h)] = struct{}{}
+	}
+
+	for name, values := range r.Header {
+		lowerName := strings.ToLower(name)
+		if _, excluded := excludeMap[lowerName]; excluded {
+			continue
+		}
+		// Join multiple header values with a comma, as per RFC 7230.
+		joinedValues := strings.Join(values, ",")
+		attrKey := fmt.Sprintf("http.request.header.%s", lowerName)
+		requestAttrs = append(
+			requestAttrs,
+			slog.String(attrKey, joinedValues),
+		)
+	}
+
+	return requestAttrs
 }
 
 // splitHostPort splits a network address hostport of the form "host",
@@ -177,6 +233,11 @@ func RequestScoped(
 // port is returned if it is not provided or unparsable.
 func splitHostPort(hostport string) (host string, port int) {
 	port = -1
+
+	// Handle simple IP without port (common in X-Forwarded-For)
+	if !strings.Contains(hostport, ":") {
+		return hostport, -1
+	}
 
 	if strings.HasPrefix(hostport, "[") {
 		addrEnd := strings.LastIndex(hostport, "]")
@@ -223,5 +284,5 @@ func parseXForwardedFor(xForwardedFor string) string {
 	if idx := strings.Index(xForwardedFor, ","); idx >= 0 {
 		xForwardedFor = xForwardedFor[:idx]
 	}
-	return xForwardedFor
+	return strings.TrimSpace(xForwardedFor)
 }
