@@ -4,10 +4,9 @@ import (
 	"crypto/tls"
 	"log/slog"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestRequestAttributes(t *testing.T) {
@@ -128,14 +127,18 @@ func TestRequestAttributes(t *testing.T) {
 			}
 
 			for k, v := range tt.want {
-				assert.Equal(t, v, attrMap[k], "Attribute %s mismatch", k)
+				if !reflect.DeepEqual(attrMap[k], v) {
+					t.Errorf("Attribute %s mismatch: got %v, want %v", k, attrMap[k], v)
+				}
 			}
 
 			// Check excluded headers
 			for _, h := range tt.excludeHeaders {
 				key := "http.request.header." + strings.ToLower(h)
 				_, exists := attrMap[key]
-				assert.False(t, exists, "Header %s should be excluded", h)
+				if exists {
+					t.Errorf("Header %s should be excluded", h)
+				}
 			}
 		})
 	}
@@ -158,8 +161,12 @@ func TestSplitHostPort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			host, port := splitHostPort(tt.input)
-			assert.Equal(t, tt.wantHost, host)
-			assert.Equal(t, tt.wantPort, port)
+			if host != tt.wantHost {
+				t.Errorf("splitHostPort(%q) host = %q, want %q", tt.input, host, tt.wantHost)
+			}
+			if port != tt.wantPort {
+				t.Errorf("splitHostPort(%q) port = %d, want %d", tt.input, port, tt.wantPort)
+			}
 		})
 	}
 }
