@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+# 2.0.0-rc-04
+
+- Added `Forwarded` header support to `httplogger`
+
 # 2.0.0-rc-03
 
 - Fixed request log attributes to correct Otel convention
