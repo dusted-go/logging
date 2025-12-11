@@ -149,10 +149,14 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	var attrsAsBytes []byte
 	if h.outputEmptyAttrs || len(attrs) > 0 {
-		attrsAsBytes, err = json.MarshalIndent(attrs, "", "  ")
-		if err != nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(attrs); err != nil {
 			return fmt.Errorf("error when marshaling attrs: %w", err)
 		}
+		attrsAsBytes = bytes.TrimRight(buf.Bytes(), "\n")
 	}
 
 	out := strings.Builder{}
